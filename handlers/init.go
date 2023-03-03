@@ -8,7 +8,8 @@ import (
 	maelstrom "github.com/jepsen-io/maelstrom/demo/go"
 )
 
-type InitMsg struct {
+// initMsg is the maelstrom node init message
+type initMsg struct {
 	Type    string   `json:"type"`
 	MsgID   int      `json:"msg_id"`
 	NodeID  string   `json:"node_id"`
@@ -19,7 +20,7 @@ type InitMsg struct {
 // seemed like the way to do it.
 func Initialize(msg maelstrom.Message) error {
 	// unmarshal into a defined struct to make getting the right types for node id, etc easier.
-	var body InitMsg
+	var body initMsg
 	if err := json.Unmarshal(msg.Body, &body); err != nil {
 		return err
 	}

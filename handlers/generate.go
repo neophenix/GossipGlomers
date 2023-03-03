@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	NIDBITLEN = 10
-	SEQBITLEN = 12
+	NIDBITLEN = 10 // node id bit length
+	SEQBITLEN = 12 // sequence bit length
 )
 
 // Generate is the unique-ids test handler
@@ -29,7 +29,7 @@ func Generate(msg maelstrom.Message) error {
 	// convert our ID to a string so that the uint -> any json marshalling doesn't kill us when it uses a float64
 	body["id"] = fmt.Sprintf("%d", id)
 
-	// Echo the original message back with the updated message type.
+	// return our id to the sender
 	return node.Reply(msg, body)
 }
 
