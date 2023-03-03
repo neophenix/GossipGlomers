@@ -18,15 +18,14 @@ type initMsg struct {
 
 // Initialize is our init handler.  Normally this is done for us but I wanted to parse out the node ID once so this
 // seemed like the way to do it.
+// Note that the lib will call node.Init for us before it passes the message to our handler, so we have the node id, etc
+// at this point
 func Initialize(msg maelstrom.Message) error {
 	// unmarshal into a defined struct to make getting the right types for node id, etc easier.
 	var body initMsg
 	if err := json.Unmarshal(msg.Body, &body); err != nil {
 		return err
 	}
-
-	// init our node
-	node.Init(body.NodeID, body.NodeIDs)
 
 	// parse our node id into an int for later
 	parsed, err := fmt.Sscanf(node.ID(), "n%d", &nodeID)
@@ -39,7 +38,7 @@ func Initialize(msg maelstrom.Message) error {
 		log.Fatal("node id should be between 0 and 1024")
 	}
 
-	// set our ok message type and send it back
-	body.Type = "init_ok"
-	return node.Reply(msg, body)
+	// the lib's handleInitMessage which is what calls our handler will also handle the init_ok response.  If we do our
+	// own it can break the tests
+	return nil
 }
