@@ -22,6 +22,8 @@ func HandleThings(n *maelstrom.Node) {
 	node.Handle("generate", Generate)
 	node.Handle("broadcast", Broadcast)
 	node.Handle("broadcast_ok", Noop)
+	node.Handle("rebroadcast", Rebroadcast)
+	node.Handle("rebroadcast_ok", Noop)
 	node.Handle("read", Read)
 	node.Handle("topology", Topology)
 }
