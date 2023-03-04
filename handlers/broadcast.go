@@ -38,10 +38,10 @@ var bcastMessages = []int64{}
 // for this its reasonable.
 var bcastSeen = map[int64]bool{}
 
-// rebroadcastMsg stores a destination and a message to send to it
+// rebroadcastMsg stores information about a message we need to rebroadcast
 type rebroadcastMsg struct {
-	Dest    string
-	Message int64
+	Dest    string // where the message is going
+	Message int64  // the message
 }
 
 // Broadcast handles the broadcast message type and appends values into our slice
@@ -61,12 +61,15 @@ func Broadcast(msg maelstrom.Message) error {
 		bcastSeen[body.Message] = true
 		// add it to our list of messages
 		bcastMessages = append(bcastMessages, body.Message)
-		// now send it off to each of our neighbors
-		for _, dest := range topology[node.ID()] {
-			// don't send back to the source
-			if dest != msg.Src {
-				msg := &rebroadcastMsg{Dest: dest, Message: body.Message}
-				msg.rebroadcast()
+
+		// now, if this came from a client, send it off to every other node in the cluster, if it isn't from a client
+		// for now we aren't going to rebroadcast to keep our messages per op low
+		if msg.Src[0] == 'c' {
+			for _, dest := range node.NodeIDs() {
+				if dest != node.ID() {
+					msg := &rebroadcastMsg{Dest: dest, Message: body.Message}
+					msg.rebroadcast()
+				}
 			}
 		}
 	}
@@ -122,8 +125,6 @@ func (msg *rebroadcastMsg) rebroadcast() {
 				// no error we are done with this message
 				return
 			}
-			// if we timed out, sleep try again
-			time.Sleep(500 * time.Millisecond)
 		}
 	}()
 }
