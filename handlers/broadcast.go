@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"sync"
 	"time"
@@ -37,19 +38,11 @@ var bcastMessages = []int64{}
 // for this its reasonable.
 var bcastSeen = map[int64]bool{}
 
-// NodeBcastQueue contains a queue and necessary items to communicate messages to other nodes
-// simple and we will expand it later
-type nodeBcastQueue struct {
-	Dest        string
-	Mutex       sync.Mutex
-	LastSent    int
-	LastConfirm int
-	MsgIDtoVal  map[int]int
-	Messages    []broadcastMsg
+// rebroadcastMsg stores a destination and a message to send to it
+type rebroadcastMsg struct {
+	Dest    string
+	Message int64
 }
-
-// bcastQueues is a map linking a node to its queue
-var bcastQueues = map[string]*nodeBcastQueue{}
 
 // Broadcast handles the broadcast message type and appends values into our slice
 func Broadcast(msg maelstrom.Message) error {
@@ -58,22 +51,24 @@ func Broadcast(msg maelstrom.Message) error {
 		return err
 	}
 
-	// lock our slice and map access
+	// lock our slice and map lookups / writing
 	bcastMutex.Lock()
 	defer bcastMutex.Unlock()
 
 	// propogate our message to other nodes if this is the first time we've seen it
 	if !bcastSeen[body.Message] {
-		for _, nodeid := range topology[node.ID()] {
-			// enqueue the message to broadcast but don't send it back to a node that just sent it to us
-			if msg.Src != nodeid {
-				bcastQueues[nodeid].Enqueue(body)
+		// Mark it seen
+		bcastSeen[body.Message] = true
+		// add it to our list of messages
+		bcastMessages = append(bcastMessages, body.Message)
+		// now send it off to each of our neighbors
+		for _, dest := range topology[node.ID()] {
+			// don't send back to the source
+			if dest != msg.Src {
+				msg := &rebroadcastMsg{Dest: dest, Message: body.Message}
+				msg.rebroadcast()
 			}
 		}
-
-		// and since this is the first time seeing the message record that fact
-		bcastSeen[body.Message] = true
-		bcastMessages = append(bcastMessages, body.Message)
 	}
 
 	// let the sender know we got it
@@ -107,12 +102,6 @@ func Topology(msg maelstrom.Message) error {
 	// just set our topology the same as we get it for now
 	topology = body.Topology
 
-	// setup broadcast queues for our neighbor nodes
-	for _, nodeid := range body.Topology[node.ID()] {
-		bcastQueues[nodeid] = &nodeBcastQueue{Dest: nodeid, LastSent: -1, LastConfirm: -1}
-		bcastQueues[nodeid].Drain()
-	}
-
 	// set our response
 	body.Type = "topology_ok"
 	body.Topology = nil
@@ -120,53 +109,21 @@ func Topology(msg maelstrom.Message) error {
 	return node.Reply(msg, body)
 }
 
-// Enqueue add a message to our queue msg slice
-func (nbq *nodeBcastQueue) Enqueue(msg broadcastMsg) {
-	nbq.Mutex.Lock()
-	defer nbq.Mutex.Unlock()
-	nbq.Messages = append(nbq.Messages, msg)
-}
-
-// Drain is called for each queue and left to do its thing.  It will check to see if it should send the next message
-// and if so send it via the rpc call by way of the PrepSend function.  If it has nothing to send will sleep momentarily
-// and then try again
-func (nbq *nodeBcastQueue) Drain() {
+// rebroadcast keeps trying to broadcast our message to the destination.
+func (msg *rebroadcastMsg) rebroadcast() {
 	go func() {
-		// wait for messages to start
-		for len(nbq.Messages) == 0 {
-			time.Sleep(10 * time.Millisecond)
-		}
+		// normally I'd have some retry limit here but for the purposes of these tests not at the moment
 		for {
-			if nbq.LastSent == nbq.LastConfirm {
-				// we are ready to send the next message
-				nbq.LastSent++
-			} else {
-				// we need to resend the last message, but going to wait first
-				time.Sleep(50 * time.Millisecond)
+			// some arbitrary timeout to get a response to our message back
+			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+			_, err := node.SyncRPC(ctx, msg.Dest, broadcastMsg{Type: "broadcast", Message: msg.Message})
+			cancel() // call cancel so the linter doesn't yell at me
+			if err == nil {
+				// no error we are done with this message
+				return
 			}
-			// we moved our sent, so as long as we now have a message to send, send it
-			if len(nbq.Messages) > nbq.LastSent {
-				nbq.Mutex.Lock()
-				node.RPC(nbq.Dest, nbq.Messages[nbq.LastSent], nbq.PrepSend())
-				nbq.Mutex.Unlock()
-			}
+			// if we timed out, sleep try again
+			time.Sleep(500 * time.Millisecond)
 		}
 	}()
-}
-
-// PrepSend wraps our RPC call in a closure so we know what value we sent out to see if we need to confirm it.  Doing
-// this since I don't think I have a way to get the msg id when we send so I'm not sure I can use the reply to know
-// which value or message it is confirming
-func (nbq *nodeBcastQueue) PrepSend() func(msg maelstrom.Message) error {
-	// we already locked this when we called the function, so it should be safe
-	val := nbq.Messages[nbq.LastSent].Message
-	return func(msg maelstrom.Message) error {
-		nbq.Mutex.Lock()
-		defer nbq.Mutex.Unlock()
-		// if this is a confirmation of the last message we sent move the confirmation forward, if not ignore it
-		if len(nbq.Messages) > nbq.LastSent && nbq.Messages[nbq.LastSent].Message == val {
-			nbq.LastConfirm++
-		}
-		return nil
-	}
 }
