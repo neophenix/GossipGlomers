@@ -119,6 +119,11 @@ func Rebroadcast(msg maelstrom.Message) error {
 
 // Read will return the broadcasted messages we've seen
 func Read(msg maelstrom.Message) error {
+	// before we do anything else, if we think we are in the grow test hand it off to that handler
+	if broadcastOrGrow != "broadcast" {
+		return ReadGrow(msg)
+	}
+
 	var body readMsg
 	if err := json.Unmarshal(msg.Body, &body); err != nil {
 		return err
@@ -140,6 +145,8 @@ func Topology(msg maelstrom.Message) error {
 	if err := json.Unmarshal(msg.Body, &body); err != nil {
 		return err
 	}
+
+	broadcastOrGrow = "broadcast"
 
 	// just set our topology the same as we get it for now
 	topology = body.Topology
